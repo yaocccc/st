@@ -5,7 +5,7 @@
  *
  * font: see http://freedesktop.org/software/fontconfig/fontconfig-user.html
  */
-static char *font = "JetBrainsMono Nerd Font Mono:pixelsize=14:antialias=true:autohint=true";
+static char *font = "JetBrainsMono Nerd Font Mono:pixelsize=14:lcdfilter=lcddefault:hintstyle=hintnone:rgba=rgb:antialias=true:autohint=true";
 static int borderpx = 2;
 int disablebold = 0;
 int disableitalic = 0;
@@ -94,7 +94,7 @@ char *termname = "st-256color";
  *
  *	stty tabs
  */
-unsigned int tabspaces = 8;
+unsigned int tabspaces = 4;
 
 /* bg opacity */
 float alpha = 0.95;
@@ -142,8 +142,8 @@ static unsigned int defaultrcs = 257;
  * will reverse too. Another logic would only make the simple feature too
  * complex.
  */
-unsigned int defaultitalic = 0;
-unsigned int defaultunderline = 7;
+unsigned int defaultitalic = 10;
+unsigned int defaultunderline = 14;
 /*
  * Default style of cursor
  * 0: blinking block
@@ -155,7 +155,7 @@ unsigned int defaultunderline = 7;
  * 6: steady bar ("|")
  * 7: Snowman ("☃")
  */
-static unsigned int cursorstyle = 1;
+static unsigned int cursorstyle = 6;
 
 /*
  * Default columns and rows numbers
