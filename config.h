@@ -5,11 +5,9 @@
  *
  * font: see http://freedesktop.org/software/fontconfig/fontconfig-user.html
  */
-static char *font = "JetBrainsMono Nerd Font Mono:pixelsize=14:lcdfilter=lcddefault:hintstyle=hintnone:rgba=rgb:antialias=true:autohint=true";
+/* static char *font = "JetBrainsMono Nerd Font Mono:pixelsize=14:antialias=true:autohint=true"; */
+static char *font = "Liberation Mono:pixelsize=14:antialias=true:autohint=true";
 static int borderpx = 2;
-int disablebold = 0;
-int disableitalic = 0;
-int disableroman = 0;
 
 /*
  * What program is execed by st depends of these precedence rules:
