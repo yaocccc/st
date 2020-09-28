@@ -47,9 +47,6 @@
 				term.scr + HISTSIZE + 1) % HISTSIZE] : \
 				term.line[(y) - term.scr])
 
-// from @LukeSmithxyz
-#define TLINE_HIST(y)           ((y) <= HISTSIZE-term.row+2 ? term.hist[(y)] : term.line[(y-HISTSIZE+term.row-3)])
-
 enum term_mode {
 	MODE_WRAP        = 1 << 0,
 	MODE_INSERT      = 1 << 1,
@@ -58,7 +55,6 @@ enum term_mode {
 	MODE_ECHO        = 1 << 4,
 	MODE_PRINT       = 1 << 5,
 	MODE_UTF8        = 1 << 6,
-	MODE_SIXEL       = 1 << 7,
 };
 
 enum cursor_movement {
@@ -85,12 +81,11 @@ enum charset {
 enum escape_state {
 	ESC_START      = 1,
 	ESC_CSI        = 2,
-	ESC_STR        = 4,  /* OSC, PM, APC */
+	ESC_STR        = 4,  /* DCS, OSC, PM, APC */
 	ESC_ALTCHARSET = 8,
 	ESC_STR_END    = 16, /* a final string was encountered */
 	ESC_TEST       = 32, /* Enter in test mode */
 	ESC_UTF8       = 64,
-	ESC_DCS        =128,
 };
 
 typedef struct {
@@ -1284,6 +1279,9 @@ tsetchar(Rune u, Glyph *attr, int x, int y)
 	term.dirty[y] = 1;
 	term.line[y][x] = *attr;
 	term.line[y][x].u = u;
+
+	if (isboxdraw(u))
+		term.line[y][x].mode |= ATTR_BOXDRAW;
 }
 
 void
@@ -1960,7 +1958,6 @@ strhandle(void)
 		xsettitle(strescseq.args[0]);
 		return;
 	case 'P': /* DCS -- Device Control String */
-		term.mode |= ESC_DCS;
 	case '_': /* APC -- Application Program Command */
 	case '^': /* PM -- Privacy Message */
 		return;
@@ -2033,78 +2030,6 @@ sendbreak(const Arg *arg)
 {
 	if (tcsendbreak(cmdfd, 0))
 		perror("Error sending break");
-}
-
-// from @LukeSmithxyz
-int
-tlinehistlen(int y)
-{
-	int i = term.col;
-
-	if (TLINE_HIST(y)[i - 1].mode & ATTR_WRAP)
-		return i;
-
-	while (i > 0 && TLINE_HIST(y)[i - 1].u == ' ')
-		--i;
-
-	return i;
-}
-
-// from @LukeSmithxyz
-void
-externalpipe(const Arg *arg)
-{
-	int to[2];
-	char buf[UTF_SIZ];
-	void (*oldsigpipe)(int);
-	Glyph *bp, *end;
-	int lastpos, n, newline;
-
-	if (pipe(to) == -1)
-		return;
-
-	switch (fork()) {
-	case -1:
-		close(to[0]);
-		close(to[1]);
-		return;
-	case 0:
-		dup2(to[0], STDIN_FILENO);
-		close(to[0]);
-		close(to[1]);
-		execvp(((char **)arg->v)[0], (char **)arg->v);
-		fprintf(stderr, "st: execvp %s\n", ((char **)arg->v)[0]);
-		perror("failed");
-		exit(0);
-	}
-
-	close(to[0]);
-	/* ignore sigpipe for now, in case child exists early */
-	oldsigpipe = signal(SIGPIPE, SIG_IGN);
-	newline = 0;
-	/* modify externalpipe patch to pipe history too      */
-	for (n = 0; n <= HISTSIZE + 2; n++) {
-		bp = TLINE_HIST(n);
-		lastpos = MIN(tlinehistlen(n) +1, term.col) - 1;
-		if (lastpos < 0)
-			break;
-		if (lastpos == 0)
-			continue;
-		end = &bp[lastpos + 1];
-		for (; bp < end; ++bp)
-			if (xwrite(to[1], buf, utf8encode(bp->u, buf)) < 0)
-				break;
-		if ((newline = TLINE_HIST(n)[lastpos].mode & ATTR_WRAP))
-			continue;
-		if (xwrite(to[1], "\n", 1) < 0)
-			break;
-		newline = 0;
-	}
-	if (newline)
-		(void)xwrite(to[1], "\n", 1);
-	close(to[1]);
-	/* restore */
-	signal(SIGPIPE, oldsigpipe);
 }
 
 void
@@ -2226,12 +2151,9 @@ tdectest(char c)
 void
 tstrsequence(uchar c)
 {
-	strreset();
-
 	switch (c) {
 	case 0x90:   /* DCS -- Device Control String */
 		c = 'P';
-		term.esc |= ESC_DCS;
 		break;
 	case 0x9f:   /* APC -- Application Program Command */
 		c = '_';
@@ -2243,6 +2165,7 @@ tstrsequence(uchar c)
 		c = ']';
 		break;
 	}
+	strreset();
 	strescseq.type = c;
 	term.esc |= ESC_STR;
 }
@@ -2440,7 +2363,7 @@ tputc(Rune u)
 	Glyph *gp;
 
 	control = ISCONTROL(u);
-	if (u < 127 || !IS_SET(MODE_UTF8 | MODE_SIXEL)) {
+	if (u < 127 || !IS_SET(MODE_UTF8)) {
 		c[0] = u;
 		width = len = 1;
 	} else {
@@ -2461,22 +2384,10 @@ tputc(Rune u)
 	if (term.esc & ESC_STR) {
 		if (u == '\a' || u == 030 || u == 032 || u == 033 ||
 		   ISCONTROLC1(u)) {
-			term.esc &= ~(ESC_START|ESC_STR|ESC_DCS);
-			if (IS_SET(MODE_SIXEL)) {
-				/* TODO: render sixel */;
-				term.mode &= ~MODE_SIXEL;
-				return;
-			}
+			term.esc &= ~(ESC_START|ESC_STR);
 			term.esc |= ESC_STR_END;
 			goto check_control_code;
 		}
-
-		if (IS_SET(MODE_SIXEL)) {
-			/* TODO: implement sixel mode */
-			return;
-		}
-		if (term.esc&ESC_DCS && strescseq.len == 0 && u == 'q')
-			term.mode |= MODE_SIXEL;
 
 		if (strescseq.len+len >= strescseq.siz) {
 			/*
@@ -2589,7 +2500,7 @@ twrite(const char *buf, int buflen, int show_ctrl)
 	int n;
 
 	for (n = 0; n < buflen; n += charsize) {
-		if (IS_SET(MODE_UTF8) && !IS_SET(MODE_SIXEL)) {
+		if (IS_SET(MODE_UTF8)) {
 			/* process a complete utf8 char */
 			charsize = utf8decode(buf + n, &u, buflen - n);
 			if (charsize == 0)
@@ -2740,9 +2651,9 @@ draw(void)
 		cx--;
 
 	drawregion(0, 0, term.col, term.row);
-	xdrawcursor(cx, term.c.y, term.line[term.c.y][cx],
-			term.ocx, term.ocy, term.line[term.ocy][term.ocx],
-			term.line[term.ocy], term.col);
+ 	if (term.scr == 0)
+ 		xdrawcursor(cx, term.c.y, term.line[term.c.y][cx],
+ 				term.ocx, term.ocy, term.line[term.ocy][term.ocx]);
 	term.ocx = cx;
 	term.ocy = term.c.y;
 	xfinishdraw();

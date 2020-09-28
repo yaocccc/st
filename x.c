@@ -19,7 +19,6 @@ char *argv0;
 #include "arg.h"
 #include "st.h"
 #include "win.h"
-#include "hb.h"
 
 /* types used in config.h */
 typedef struct {
@@ -105,11 +104,6 @@ typedef struct {
 	Draw draw;
 	Visual *vis;
 	XSetWindowAttributes attrs;
-	/* Here, we use the term *pointer* to differentiate the cursor
-	 * one sees when hovering the mouse over the terminal from, e.g.,
-	 * a green rectangle where text would be entered. */
-	Cursor vpointer, bpointer; /* visible and hidden pointers */
-	int pointerisvisible;
 	int scr;
 	int isfixed; /* is fixed geometry? */
 	int depth; /* bit depth */
@@ -707,13 +701,6 @@ brelease(XEvent *e)
 void
 bmotion(XEvent *e)
 {
-	if (!xw.pointerisvisible) {
-		XDefineCursor(xw.dpy, xw.win, xw.vpointer);
-		xw.pointerisvisible = 1;
-		if (!IS_SET(MODE_MOUSEMANY))
-			xsetpointermotion(0);
-	}
-
 	if (IS_SET(MODE_MOUSE) && !(e->xbutton.state & forcemousemod)) {
 		mousereport(e);
 		return;
@@ -1057,9 +1044,6 @@ xunloadfont(Font *f)
 void
 xunloadfonts(void)
 {
-	/* Clear Harfbuzz font cache. */
-	hbunloadfonts();
-
 	/* Free the loaded fonts in the font cache.  */
 	while (frclen > 0)
 		XftFontClose(xw.dpy, frc[--frclen].font);
@@ -1128,10 +1112,10 @@ void
 xinit(int cols, int rows)
 {
 	XGCValues gcvalues;
+	Cursor cursor;
 	Window parent;
 	pid_t thispid = getpid();
 	XColor xmousefg, xmousebg;
-	Pixmap blankpm;
 	XWindowAttributes attr;
 	XVisualInfo vis;
 
@@ -1203,9 +1187,8 @@ xinit(int cols, int rows)
 	}
 
 	/* white cursor, black outline */
-	xw.pointerisvisible = 1;
-	xw.vpointer = XCreateFontCursor(xw.dpy, mouseshape);
-	XDefineCursor(xw.dpy, xw.win, xw.vpointer);
+	cursor = XCreateFontCursor(xw.dpy, mouseshape);
+	XDefineCursor(xw.dpy, xw.win, cursor);
 
 	if (XParseColor(xw.dpy, xw.cmap, colorname[mousefg], &xmousefg) == 0) {
 		xmousefg.red   = 0xffff;
@@ -1219,10 +1202,7 @@ xinit(int cols, int rows)
 		xmousebg.blue  = 0x0000;
 	}
 
-	XRecolorCursor(xw.dpy, xw.vpointer, &xmousefg, &xmousebg);
-	blankpm = XCreateBitmapFromData(xw.dpy, xw.win, &(char){0}, 1, 1);
-	xw.bpointer = XCreatePixmapCursor(xw.dpy, blankpm, blankpm,
-					  &xmousefg, &xmousebg, 0, 0);
+	XRecolorCursor(xw.dpy, cursor, &xmousefg, &xmousebg);
 
 	xw.xembed = XInternAtom(xw.dpy, "_XEMBED", False);
 	xw.wmdeletewin = XInternAtom(xw.dpy, "WM_DELETE_WINDOW", False);
@@ -1246,6 +1226,8 @@ xinit(int cols, int rows)
 	xsel.xtarget = XInternAtom(xw.dpy, "UTF8_STRING", 0);
 	if (xsel.xtarget == None)
 		xsel.xtarget = XA_STRING;
+
+	boxdraw_xinit(xw.dpy, xw.cmap, xw.draw, xw.vis);
 }
 
 int
@@ -1270,7 +1252,7 @@ xmakeglyphfontspecs(XftGlyphFontSpec *specs, const Glyph *glyphs, int len, int x
 		mode = glyphs[i].mode;
 
 		/* Skip dummy wide-character spacing. */
-		if (mode & ATTR_WDUMMY)
+		if (mode == ATTR_WDUMMY)
 			continue;
 
 		/* Determine font for glyph if different from previous glyph. */
@@ -1292,8 +1274,13 @@ xmakeglyphfontspecs(XftGlyphFontSpec *specs, const Glyph *glyphs, int len, int x
 			yp = winy + font->ascent;
 		}
 
-		/* Lookup character index with default font. */
-		glyphidx = XftCharIndex(xw.dpy, font->match, rune);
+		if (mode & ATTR_BOXDRAW) {
+			/* minor shoehorning: boxdraw uses only this ushort */
+			glyphidx = boxdrawindex(&glyphs[i]);
+		} else {
+			/* Lookup character index with default font. */
+			glyphidx = XftCharIndex(xw.dpy, font->match, rune);
+		}
 		if (glyphidx) {
 			specs[numspecs].font = font->match;
 			specs[numspecs].glyph = glyphidx;
@@ -1376,9 +1363,6 @@ xmakeglyphfontspecs(XftGlyphFontSpec *specs, const Glyph *glyphs, int len, int x
 		xp += runewidth;
 		numspecs++;
 	}
-
-	/* Harfbuzz transformation for ligatures. */
-	hbtransform(specs, glyphs, len, x, y);
 
 	return numspecs;
 }
@@ -1500,13 +1484,12 @@ xdrawglyphfontspecs(const XftGlyphFontSpec *specs, Glyph base, int len, int x, i
 	r.width = width;
 	XftDrawSetClipRectangles(xw.draw, winx, winy, &r, 1);
 
-	/* Render the glyphs. */
-	/*XftDrawGlyphFontSpec(xw.draw, fg, specs, len);*/
-	FcBool b = FcFalse;
-FcPatternGetBool(specs->font->pattern, FC_COLOR, 0, &b);
-if (!b) {
-    XftDrawGlyphFontSpec(xw.draw, fg, specs, len);
-}
+	if (base.mode & ATTR_BOXDRAW) {
+		drawboxes(winx, winy, width / len, win.ch, fg, bg, specs, len);
+	} else {
+		/* Render the glyphs. */
+		XftDrawGlyphFontSpec(xw.draw, fg, specs, len);
+	}
 
 	/* Render underline and strikethrough. */
 	if (base.mode & ATTR_UNDERLINE) {
@@ -1534,17 +1517,14 @@ xdrawglyph(Glyph g, int x, int y)
 }
 
 void
-xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og, Line line, int len)
+xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 {
 	Color drawcol;
 
 	/* remove the old cursor */
 	if (selected(ox, oy))
 		og.mode ^= ATTR_REVERSE;
-
-	/* Redraw the line where cursor was previously.
-	 * It will restore the ligatures broken by the cursor. */
-	xdrawline(line, 0, oy, len);
+	xdrawglyph(og, ox, oy);
 
 	if (IS_SET(MODE_HIDE))
 		return;
@@ -1552,7 +1532,7 @@ xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og, Line line, int le
 	/*
 	 * Select the right color for the right mode.
 	 */
-	g.mode &= ATTR_BOLD|ATTR_ITALIC|ATTR_UNDERLINE|ATTR_STRUCK|ATTR_WIDE;
+	g.mode &= ATTR_BOLD|ATTR_ITALIC|ATTR_UNDERLINE|ATTR_STRUCK|ATTR_WIDE|ATTR_BOXDRAW;
 
 	if (IS_SET(MODE_REVERSE)) {
 		g.mode |= ATTR_REVERSE;
@@ -1580,20 +1560,13 @@ xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og, Line line, int le
 		switch (win.cursor) {
 		case 7: /* st extension */
 			g.u = 0x2603; /* snowman (U+2603) */
-			xdrawglyph(g, cx, cy);
-			break;
+			/* FALLTHROUGH */
 		case 0: /* Blinking Block */
 		case 1: /* Blinking Block (Default) */
-			if (IS_SET(MODE_BLINK))
-				break;
-			/* FALLTHROUGH */
 		case 2: /* Steady Block */
 			xdrawglyph(g, cx, cy);
 			break;
 		case 3: /* Blinking Underline */
-			if (IS_SET(MODE_BLINK))
-				break;
-			/* FALLTHROUGH */
 		case 4: /* Steady Underline */
 			XftDrawRect(xw.draw, &drawcol,
 					win.hborderpx + cx * win.cw,
@@ -1602,9 +1575,6 @@ xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og, Line line, int le
 					win.cw, cursorthickness);
 			break;
 		case 5: /* Blinking bar */
-			if (IS_SET(MODE_BLINK))
-				break;
-			/* FALLTHROUGH */
 		case 6: /* Steady bar */
 			XftDrawRect(xw.draw, &drawcol,
 					win.hborderpx + cx * win.cw,
@@ -1736,8 +1706,6 @@ unmap(XEvent *ev)
 void
 xsetpointermotion(int set)
 {
-	if (!set && !xw.pointerisvisible)
-		return;
 	MODBIT(xw.attrs.event_mask, set, PointerMotionMask);
 	XChangeWindowAttributes(xw.dpy, xw.win, CWEventMask, &xw.attrs);
 }
@@ -1857,12 +1825,6 @@ kpress(XEvent *ev)
 	Status status;
 	Shortcut *bp;
 
-	if (xw.pointerisvisible) {
-		XDefineCursor(xw.dpy, xw.win, xw.bpointer);
-		xsetpointermotion(1);
-		xw.pointerisvisible = 0;
-	}
-
 	if (IS_SET(MODE_KBDLOCK))
 		return;
 
@@ -1940,7 +1902,6 @@ run(void)
 	int xfd = XConnectionNumber(xw.dpy), ttyfd, xev, drawing;
 	struct timespec seltv, *tv, now, lastblink, trigger;
 	double timeout;
-	int blinkcursor;
 
 	/* Waiting for window mapping */
 	do {
@@ -2007,10 +1968,6 @@ run(void)
 		if (FD_ISSET(ttyfd, &rfd) || xev) {
 			if (!drawing) {
 				trigger = now;
-				if (IS_SET(MODE_BLINK)) {
-					win.mode ^= MODE_BLINK;
-				}
-				lastblink = now;
 				drawing = 1;
 			}
 			timeout = (maxlatency - TIMEDIFF(now, trigger)) \
@@ -2021,9 +1978,7 @@ run(void)
 
 		/* idle detected or maxlatency exhausted -> draw */
 		timeout = -1;
-		blinkcursor = win.cursor == 0 || win.cursor == 1 ||
-		              win.cursor == 3 || win.cursor == 5;
-		if (blinktimeout && (blinkcursor || tattrset(ATTR_BLINK))) {
+		if (blinktimeout && tattrset(ATTR_BLINK)) {
 			timeout = blinktimeout - TIMEDIFF(now, lastblink);
 			if (timeout <= 0) {
 				if (-timeout > blinktimeout) /* start visible */
@@ -2059,7 +2014,7 @@ main(int argc, char *argv[])
 {
 	xw.l = xw.t = 0;
 	xw.isfixed = False;
-	win.cursor = cursorstyle;
+	xsetcursor(cursorshape);
 
 	ARGBEGIN {
 	case 'a':
