@@ -2658,7 +2658,8 @@ draw(void)
 	drawregion(0, 0, term.col, term.row);
  	if (term.scr == 0)
  		xdrawcursor(cx, term.c.y, term.line[term.c.y][cx],
- 				term.ocx, term.ocy, term.line[term.ocy][term.ocx]);
+ 				term.ocx, term.ocy, term.line[term.ocy][term.ocx],
+                term.line[term.ocy], term.col);
 	term.ocx = cx;
 	term.ocy = term.c.y;
 	xfinishdraw();
@@ -2718,7 +2719,8 @@ void select_or_drawcursor(int selectsearch_mode, int type) {
 	}
 	else
 		xdrawcursor(term.c.x, term.c.y, term.line[term.c.y][term.c.x],
-			    term.ocx, term.ocy, term.line[term.ocy][term.ocx]);
+			    term.ocx, term.ocy, term.line[term.ocy][term.ocx],
+                term.line[term.ocy], term.col);
 }
 
 void search(int selectsearch_mode, Rune *target, int ptarget, int incr, int type, TCursor *cu) {
