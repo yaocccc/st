@@ -128,7 +128,7 @@ static const char *colorname[] = {
   [12] = "#bd93f9", /* blue    */
   [13] = "#ff79c6", /* magenta */
   [14] = "#8be9fd", /* cyan    */
-  [15] = "#ffffff", /* white   */
+  [15] = "#dddddd", /* white   */
 
   /* special colors */
   [256] = "#222D31", /* background */
