@@ -27,7 +27,7 @@ char *vtiden = "\033[?6c";
 
 /* Kerning / character bounding-box multipliers */
 static float cwscale = 1.0;
-static float chscale = 0.85;
+static float chscale = 0.9;
 
 /*
  * word delimiter string
@@ -80,7 +80,7 @@ const int boxdraw_bold = 1;
 const int boxdraw_braille = 1;
 
 /* bg opacity */
-float alpha = 0.85;
+float alpha = 0.9;
 
 /*
  * bell volume. It must be a value between -100 and 100. Use 0 for disabling
