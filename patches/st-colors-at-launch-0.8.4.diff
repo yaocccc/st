@@ -1,0 +1,38 @@
+From 268d767b16d21f6f936bd5e3dfcd4f0187a8e979 Mon Sep 17 00:00:00 2001
+From: MLquest8 <miskuzius@gmail.com>
+Date: Sun, 12 Jul 2020 09:47:25 +0400
+Subject: [PATCH] allow to alocate colors as launch options. Example: -C
+ "#color@num"
+
+---
+ x.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/x.c b/x.c
+index 210f184..a07e358 100644
+--- a/x.c
++++ b/x.c
+@@ -1980,6 +1980,8 @@ usage(void)
+ int
+ main(int argc, char *argv[])
+ {
++    int i;
++    char *colval;
+ 	xw.l = xw.t = 0;
+ 	xw.isfixed = False;
+ 	xsetcursor(cursorshape);
+@@ -2024,6 +2026,11 @@ main(int argc, char *argv[])
+ 	case 'v':
+ 		die("%s " VERSION "\n", argv0);
+ 		break;
++    case 'C':
++        colval = strtok(EARGF(usage()), "@");
++        i = atoi(strtok(NULL, "@"));
++		colorname[i] = colval;
++		break;
+ 	default:
+ 		usage();
+ 	} ARGEND;
+-- 
+2.26.2
+
