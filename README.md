@@ -4,6 +4,38 @@
 
 sudo make clean install
 
+## Nix Flake
+下面是在 nixos configuration 中使用它的示例
+```nix 
+{
+  description = "My configuration";
+
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    dwm.url = "github:yaocccc/st";
+  };
+
+  outputs = { nixpkgs, st, ... }:
+    {
+      nixosConfigurations = {
+        hostname = nixpkgs.lib.nixosSystem
+          {
+            system = "x86_64-linux";
+            modules = [
+              {
+                nixpkgs.overlays = [ st.overlays.default ];
+                environment.systemPackages = with pkgs;[
+                  st
+                  tabbed # 多tab支持
+                ];
+              }
+            ];
+          };
+      };
+    };
+}
+```
+
 ## 如果你想使用多tab能力
 
 可参考 [https://github.com/yaocccc/tabbed](https://github.com/yaocccc/tabbed)
