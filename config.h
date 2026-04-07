@@ -86,7 +86,7 @@ const int boxdraw_bold = 0;
 const int boxdraw_braille = 0;
 
 /* bg opacity */
-float alpha = 0.9;
+float alpha = 0.95;
 
 /*
  * bell volume. It must be a value between -100 and 100. Use 0 for disabling
